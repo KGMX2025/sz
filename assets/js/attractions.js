@@ -639,7 +639,9 @@ async function renderAttractions() {
     }
     items.forEach(attraction => {
         const slug = attraction.slug;
-        const detailUrl = `attractions/detail.html?slug=${slug}`;
+        const detailUrl = window.PathAdapter && typeof window.PathAdapter.buildDetailHref === 'function'
+            ? window.PathAdapter.buildDetailHref(slug)
+            : `attractions/detail.html?slug=${slug}`;
         const base = resolveAssetsBase();
         const imgSrc = (attraction.image || '').startsWith('assets/') ? `${base}${attraction.image.replace('assets/','')}` : (attraction.image || `${base}images/placeholder.svg`);
         console.log(`[list] link=${detailUrl} slug=${slug} mode=query`);
@@ -663,11 +665,14 @@ async function renderAttractions() {
             </div>
         `;
         card.setAttribute('data-index', String(items.indexOf(attraction)));
+        card.setAttribute('data-slug', slug || '');
         grid.appendChild(card);
     });
     
     // 确保卡片创建完成后绑定点击事件
     bindAttractionClickEvents();
+    bindDetailEntryScroll();
+    restoreEntryScroll();
 }
 
 /**
@@ -755,14 +760,26 @@ function saveEntryScroll(slug) {
 
 /**
  * 功能：从 sessionStorage 恢复列表滚动位置（中文注释）
- * 说明：仅在数据有效且未过期时恢复，并清理已使用的数据
+ * 说明：优先按条目 slug 定位卡片，不可用时回退到滚动坐标
  */
 function restoreEntryScroll() {
+    const slug = sessionStorage.getItem('attractionsEntrySlug') || '';
     const yStr = sessionStorage.getItem('attractionsScrollY');
     const atStr = sessionStorage.getItem('attractionsSavedAt');
     const y = yStr ? parseInt(yStr, 10) : NaN;
     const at = atStr ? parseInt(atStr, 10) : 0;
-    if (!Number.isNaN(y) && Date.now() - at < 5 * 60 * 1000) {
+    const valid = Date.now() - at < 5 * 60 * 1000;
+    if (valid && slug) {
+        const card = document.querySelector(`.attraction-card[data-slug="${slug}"]`);
+        if (card) {
+            const navbar = document.getElementById('navbar');
+            const offset = navbar ? navbar.getBoundingClientRect().height + 16 : 80;
+            const top = window.scrollY + card.getBoundingClientRect().top - offset;
+            window.scrollTo({ top, behavior: 'auto' });
+        } else if (!Number.isNaN(y)) {
+            window.scrollTo({ top: y, behavior: 'auto' });
+        }
+    } else if (!Number.isNaN(y) && valid) {
         window.scrollTo({ top: y, behavior: 'auto' });
     }
     sessionStorage.removeItem('attractionsScrollY');
@@ -915,10 +932,6 @@ function showAttractionDetail(attraction) {
     const desc = lang === 'en' ? attraction.descriptionEn : attraction.description;
     const location = lang === 'en' ? attraction.locationEn : attraction.location;
     
-    // 更新浏览器URL
-    const detailUrl = `pages/attractions/detail.html?slug=${attraction.slug}`;
-    history.pushState({ modal: true, slug: attraction.slug }, name, detailUrl);
-    
     // 创建模态框
     const modal = document.createElement('div');
     modal.className = 'modal-overlay';
@@ -937,6 +950,15 @@ function showAttractionDetail(attraction) {
     // 添加到页面
     document.body.appendChild(modal);
     
+    const slug = attraction.slug || '';
+    const previousUrl = window.location.href;
+    if (slug) {
+        const detailUrl = window.PathAdapter && typeof window.PathAdapter.buildDetailHref === 'function'
+            ? window.PathAdapter.buildDetailHref(slug)
+            : `attractions/detail.html?slug=${slug}`;
+        history.pushState({ modal: true, slug }, name, detailUrl);
+    }
+    
     // 关闭模态框 - 点击关闭按钮
     const closeBtn = modal.querySelector('.modal-close');
     const handleEscKey = (e) => {
@@ -946,6 +968,9 @@ function showAttractionDetail(attraction) {
     };
     const closeWithCleanup = () => {
         document.removeEventListener('keydown', handleEscKey);
+        if (previousUrl) {
+            history.replaceState({ modal: false }, document.title, previousUrl);
+        }
         closeModal(modal);
     };
     if (closeBtn) {
@@ -1011,6 +1036,7 @@ function bindAttractionClickEvents() {
                 const imgSrc = (data.image || '').startsWith('assets/') ? `${base}${data.image.replace('assets/','')}` : (data.image || `${base}images/placeholder.svg`);
                 
                 const mapped = {
+                    slug: data.slug,
                     name: data.name,
                     nameEn: data.nameEn,
                     description: data.seo?.description?.zh || '',
@@ -1154,10 +1180,6 @@ document.addEventListener('DOMContentLoaded', () => {
         carousel.init();
     }
     
-    if (document.getElementById('attractionsGrid')) {
-        restoreEntryScroll();
-        bindDetailEntryScroll();
-    }
 });
 
 // ------------------------------

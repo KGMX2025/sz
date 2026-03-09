@@ -360,7 +360,9 @@ async function renderFood() {
     }
     items.forEach(item => {
         const slug = item.slug;
-        const detailUrl = `attractions/detail.html?type=food&slug=${slug}`;
+        const detailUrl = window.PathAdapter && typeof window.PathAdapter.buildDetailHref === 'function'
+            ? window.PathAdapter.buildDetailHref(slug, 'food')
+            : `attractions/detail.html?type=food&slug=${slug}`;
         const base = getAssetsBase();
         const imgSrc = (item.image || '').startsWith('assets/') ? `${base}${item.image.replace('assets/','')}` : (item.image || `${base}images/placeholder.svg`);
         
@@ -383,8 +385,11 @@ async function renderFood() {
             </div>
         `;
         card.setAttribute('data-index', String(items.indexOf(item)));
+        card.setAttribute('data-slug', slug || '');
         grid.appendChild(card);
     });
+    bindDetailEntryScroll();
+    restoreEntryScroll();
 }
 
 function renderFoodEmptyState() {
@@ -450,11 +455,23 @@ function saveEntryScroll(slug) {
 }
 
 function restoreEntryScroll() {
+    const slug = sessionStorage.getItem('foodEntrySlug') || '';
     const yStr = sessionStorage.getItem('foodScrollY');
     const atStr = sessionStorage.getItem('foodSavedAt');
     const y = yStr ? parseInt(yStr, 10) : NaN;
     const at = atStr ? parseInt(atStr, 10) : 0;
-    if (!Number.isNaN(y) && Date.now() - at < 5 * 60 * 1000) {
+    const valid = Date.now() - at < 5 * 60 * 1000;
+    if (valid && slug) {
+        const card = document.querySelector(`.attraction-card[data-slug="${slug}"]`);
+        if (card) {
+            const navbar = document.getElementById('navbar');
+            const offset = navbar ? navbar.getBoundingClientRect().height + 16 : 80;
+            const top = window.scrollY + card.getBoundingClientRect().top - offset;
+            window.scrollTo({ top, behavior: 'auto' });
+        } else if (!Number.isNaN(y)) {
+            window.scrollTo({ top: y, behavior: 'auto' });
+        }
+    } else if (!Number.isNaN(y) && valid) {
         window.scrollTo({ top: y, behavior: 'auto' });
     }
     sessionStorage.removeItem('foodScrollY');
@@ -634,10 +651,6 @@ function init() {
 document.addEventListener('DOMContentLoaded', () => {
     init();
     
-    if (document.getElementById('foodGrid')) {
-        restoreEntryScroll();
-        bindDetailEntryScroll();
-    }
 });
 
 // 监听系统主题变化
